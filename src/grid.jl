@@ -28,24 +28,17 @@ struct Grid
     end
 end
 
-function relativeposition(position::Tuple{Float64,Float64}, structure::GridStructure,
-        epsilon::Float64 = 1e-10)
-    return (position .- structure.center) ./ ((1 + epsilon) .* structure.shape)
-end
-
-function fuzzyindex(position::Tuple{Float64,Float64}, structure::GridStructure,
-        epsilon::Float64 = 1e-10)
-    relpos = relativeposition(position, structure, epsilon)
-    fuzzyindex = (relpos .+ 0.5) .* structure.resolution
-end
-
+"Associate a position tuple to its tile index."
 function index(position::Tuple{Float64,Float64}, structure::GridStructure,
         epsilon::Float64 = 1e-10)
-    fzyidx = fuzzyindex(position, structure, epsilon)
+    relpos = ((position .- structure.center) ./ ((1 + epsilon) .* structure.shape)) .+ 0.5
+    fzyidx = relpos .* structure.resolution
     return (floor(Int64, fzyidx[1]), floor(Int64, fzyidx[2]))
 end
 
-function index(position::Tuple{Float64,Float64}, grid::Grid, epsilon::Float64 = 1e-10)
+"Wraps index(position::Tuple{Float64,Float64}, structure::GridStructure, ..."
+function index(position::Tuple{Float64,Float64}, grid::Grid,
+        epsilon::Float64 = 1e-10)
     return index(position, grid.structure, epsilon)
 end
 
@@ -62,10 +55,9 @@ function mysetdiff(y, x)
     res
 end
 
+""
 function formatrow(x, leadingindex::Vector{Int64})
-    coordinates = x[leadingindex]
-    data = mysetdiff(x, coordinates)
-    return join(coordinates, ',')*'\n'
+    return join(x, ',')*'\n'
 end
 
 function tilelabel(rootdir::String, idx::Tuple{Int64, Int64})
@@ -101,13 +93,24 @@ function write_metadata(grid::Grid)
     end
 end
 
+function read_metadata(rootdir::String)
+    path = join([rootdir, "structure.csv"], '/')
+    open(path, "r") do f
+        return DelimitedFiles.readdlm(f)
+    end
+end
+
+function write!(grid::Grid, row)
+    pos = Tuple{Float64, Float64}(row[grid.structure.spatialindex])
+    idx = index(pos, grid)
+    frow = formatrow(row, grid.structure.spatialindex)
+    write_and_open!(grid, idx, frow)
+end
+
 function writegrid!(grid::Grid, rows)
+    #map(x -> write_to_tile!(grid, x), rows)
     for x in rows
-        pos = Tuple{Float64, Float64}(x[grid.structure.spatialindex])
-        println(typeof(pos))
-        idx = index(pos, grid)
-        row = formatrow(x, grid.structure.spatialindex)
-        write_and_open!(grid, idx, row)
+        write!(grid, x)
     end
     for f in values(grid.tiles)
         close(f)
@@ -115,7 +118,7 @@ function writegrid!(grid::Grid, rows)
     write_metadata(grid)
 end
 
-# a memory-optimized alternative to Julia's readdml
+"A memory-optimized alternative to Julia's readdml."
 struct LazyDelimitedFile
     # delimited file
     file::IOStream
@@ -125,7 +128,7 @@ struct LazyDelimitedFile
     sep::Char
 end
 
-"Accumulate chars until `dtf.delim` is encountered, then split by `ldf.sep`"
+"Accumulate chars until `ldf.delim` is encountered, then split by `ldf.sep`."
 function Base.iterate(ldf::LazyDelimitedFile, state=missing)
     item = ""::String
     while !eof(ldf.file)
@@ -138,20 +141,17 @@ function Base.iterate(ldf::LazyDelimitedFile, state=missing)
     end
 end
 
-function parserow(row, index::Vector{Int64})
-    parsed = Vector{Any}()
-    for i in 1:length(row)
-        if i in index
-            push!(parsed, parse(Float64, row[i]))
-        else
-            push!(parsed, row[i])
-        end
+"."
+function parserow!(row, index::Vector{Int64})
+    for i in index
+        row[i] = parse(Float64, row[i])
     end
-    return parsed
+    return row
 end
 
 function tiledata(f::IOStream, spatialindex::Vector{Int64})
-    return Iterators.map(x -> parserow(x, spatialindex), LazyDelimitedFile(f, '\n', ','))
+    return Iterators.map(x -> parserow!(x, spatialindex),
+        LazyDelimitedFile(f, '\n', ','))
 end
 
 function refinetile(grid::Grid, idx::Tuple{Int64, Int64}, resolution::Int64,
@@ -178,9 +178,19 @@ function refinegrid(grid::Grid, threshold::Int64, resolution::Int64,
     for idx in keys(grid.tiles)
         n = grid.substructure[idx].cardinality
         if n > threshold
-            reftile = refinetile(grid, idx, resolution, spatialindex)
-            push!(subgrids, reftile)
+            refinedgrid = refinetile(grid, idx, resolution, spatialindex)
+            push!(subgrids, refinedgrid)
         end
     end
     return subgrids
+end
+
+function dotest()
+    n = 5000
+    r = 9
+    points = ((x, y, "meta", 'd', 4, 't', 4) for x in 0:n for y in 0:n)
+    grid = Grid("db", r, (n+1)^2, [1, 2], (n/2, n/2), (n,n))
+    print("writing ", (n+1)^2, " rows...")
+    @time writegrid!(grid, points)
+    @time refinegrid(grid, parse(Int64, grid.structure.cardinality / (r^2)), r)
 end
