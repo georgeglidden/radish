@@ -34,10 +34,10 @@ end
 
 function tilebounds(structure::GridStructure, idx::Tuple{Int64, Int64})
     gridcorner = corner(structure)
-    shape = grid.structure.shape ./ grid.structure.resolution
-    corner = gridcorner .+ (idx .* tileshape)
-    center = tilecorner .+ (tileshape ./ 2)
-    return shape, center, corner
+    tileshape = structure.shape ./ structure.resolution
+    tilecorner = gridcorner .+ (idx .* tileshape)
+    tilecenter = tilecorner .+ (tileshape ./ 2)
+    return tileshape, tilecenter, tilecorner
 end
 
 function cardinality(grid::Grid, idx::Tuple{Int64, Int64})
@@ -210,5 +210,5 @@ function testgrid()
     println("writing ", (n+1)^2, " rows...")
     write_grid!(grid, points)
     println("refining grid")
-    refine_grid(grid, round(Int64, grid.structure.cardinality / (2*r^2)), r, [1, 2])
+    @time refine_grid(grid, round(Int64, grid.structure.cardinality / (2*r^2)), r, [1, 2])
 end
